@@ -6,8 +6,8 @@ The calculator allows researchers, students, and practitioners to perform AHP pa
 
 ## Key Features
 
-- Supports 5–15 criteria or indicators
-- Supports 6–20 respondents or experts
+- Supports 3–25 criteria or indicators
+- Supports 2–20 respondents or experts
 - Full Saaty pairwise comparison scale from 1/9 to 9
 - Group decision-making using geometric mean
 - Automatic aggregated pairwise comparison matrix
