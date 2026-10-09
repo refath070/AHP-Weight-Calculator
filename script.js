@@ -1,4 +1,4 @@
-const RI = {1:0,2:0,3:0.58,4:0.90,5:1.12,6:1.24,7:1.32,8:1.41,9:1.45,10:1.49,11:1.51,12:1.48,13:1.56,14:1.57,15:1.59};
+const RI = {1:0,2:0,3:0.58,4:0.90,5:1.12,6:1.24,7:1.32,8:1.41,9:1.45,10:1.49,11:1.51,12:1.48,13:1.56,14:1.57,15:1.59,16:1.5978,17:1.6086,18:1.6181,19:1.6265,20:1.6341,21:1.6409,22:1.6470,23:1.6526,24:1.6577,25:1.6624};
 const SAATY = [
   {v:1/9,l:'1/9 — B extreme'},
   {v:1/8,l:'1/8 — B very strong ↔ extreme'},
@@ -94,8 +94,8 @@ function escapeHtml(s) {
 
 function syncSetupFromInputs() {
   state.hazard = $('hazardName').value.trim() || 'Hazard Susceptibility';
-  state.n = clamp($('indicatorCount').value, 5, 15);
-  state.respondents = clamp($('respondentCount').value, 6, 20);
+  state.n = clamp($('indicatorCount').value, 3, 25);
+  state.respondents = clamp($('respondentCount').value, 2, 20);
   $('indicatorCount').value = state.n;
   $('respondentCount').value = state.respondents;
   initializeIndicators();
@@ -109,8 +109,8 @@ function updateCounts() {
 }
 
 function rebuildIndicatorsIfCountChanged() {
-  const newN = clamp($('indicatorCount').value,5,15);
-  const newR = clamp($('respondentCount').value,6,20);
+  const newN = clamp($('indicatorCount').value,3,25);
+  const newR = clamp($('respondentCount').value,2,20);
   if (newN !== state.n || newR !== state.respondents) {
     state.n = newN;
     state.respondents = newR;
@@ -393,7 +393,7 @@ function loadLocal() {
   if (!raw) return toast('No saved calculator found in this browser.');
   try {
     const x = JSON.parse(raw);
-    state.hazard=x.hazard||'Hazard Susceptibility'; state.n=clamp(x.n,5,15); state.respondents=clamp(x.respondents,6,20);
+    state.hazard=x.hazard||'Hazard Susceptibility'; state.n=clamp(x.n,3,25); state.respondents=clamp(x.respondents,2,20);
     state.indicators=Array.isArray(x.indicators)?x.indicators.slice(0,state.n):defaultIndicators(state.n);
     state.descriptions=Array.isArray(x.descriptions)?x.descriptions.slice(0,state.n):Array(state.n).fill('');
     state.judgments=x.judgments||{}; state.result=null;
