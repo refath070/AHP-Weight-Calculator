@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="description" content="Reusable AHP weight calculator for hazard assessment, GIS, remote sensing and MCDA." />
+  <title>AHP Hazard Weight Calculator</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <header class="hero">
+    <div class="hero-glow hero-glow-a"></div>
+    <div class="hero-glow hero-glow-b"></div>
+    <div class="wrap hero-inner">
+      <div>
+        <span class="eyebrow">GIS • Remote Sensing • MCDA</span>
+        <h1>AHP Hazard Weight Calculator</h1>
+        <p>Calculate group AHP weights for any hazard using 5–15 indicators and 6–20 respondents.</p>
+      </div>
+      <div class="hero-badge">Made by Refath</div>
+    </div>
+  </header>
+
+  <nav class="tabs wrap" aria-label="Calculator sections">
+    <button class="tab active" data-tab="setup">1. Setup</button>
+    <button class="tab" data-tab="judgments">2. Judgments</button>
+    <button class="tab" data-tab="results">3. Results</button>
+    <button class="tab" data-tab="scale">Saaty Scale</button>
+  </nav>
+
+  <main class="wrap">
+    <section id="setup" class="panel tab-panel active">
+      <div class="section-head">
+        <div>
+          <h2>Model Setup</h2>
+          <p>Define the objective, number of indicators, respondents, and criterion names.</p>
+        </div>
+        <div class="actions compact">
+          <button id="flashFloodBtn" class="btn secondary">Load Flash Flood Example</button>
+          <button id="resetBtn" class="btn ghost">Reset</button>
+        </div>
+      </div>
+
+      <div class="grid two">
+        <label class="field">
+          <span>Hazard / Objective</span>
+          <input id="hazardName" type="text" value="Hazard Susceptibility" maxlength="120" />
+        </label>
+        <div class="grid two nested">
+          <label class="field">
+            <span>Indicators (n)</span>
+            <input id="indicatorCount" type="number" min="5" max="15" value="8" />
+          </label>
+          <label class="field">
+            <span>Respondents (N)</span>
+            <input id="respondentCount" type="number" min="6" max="20" value="6" />
+          </label>
+        </div>
+      </div>
+
+      <div class="kpi-row">
+        <div class="kpi kpi-purple"><span>Pair comparisons</span><strong id="pairCount">28</strong></div>
+        <div class="kpi kpi-blue"><span>Total judgments</span><strong id="judgmentCount">168</strong></div>
+        <div class="kpi kpi-green"><span>Consistency target</span><strong>CR ≤ 0.10</strong></div>
+      </div>
+
+      <h3>Indicators / Criteria</h3>
+      <div id="indicatorInputs" class="indicator-list"></div>
+
+      <div class="actions">
+        <button id="buildBtn" class="btn primary">Build Pairwise Calculator</button>
+        <button id="saveBtn" class="btn secondary">Save in Browser</button>
+        <button id="loadBtn" class="btn ghost">Load Saved</button>
+      </div>
+    </section>
+
+    <section id="judgments" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <h2>Pairwise Judgments</h2>
+          <p>For each criterion pair, select one Saaty value per respondent. The group judgment is aggregated using the geometric mean.</p>
+        </div>
+        <div class="actions compact">
+          <button id="randomBtn" class="btn secondary">Fill Random Coherent Demo</button>
+          <button id="clearJudgmentsBtn" class="btn ghost">Clear Judgments</button>
+        </div>
+      </div>
+
+      <div class="notice judgment-guide">
+        <div class="notice-icon">⚖</div>
+        <div><strong>How to enter judgments:</strong> values <b>above 1</b> favor Criterion A, values <b>below 1</b> favor Criterion B, and <b>1</b> means equal importance. Every dropdown now shows the full Saaty meaning from <b>1/9 to 9</b>.</div>
+      </div>
+
+      <div class="progress-wrap">
+        <div class="progress-label"><span>Completion</span><strong id="completionText">0%</strong></div>
+        <div class="progress"><div id="completionBar"></div></div>
+      </div>
+
+      <div class="table-wrap tall">
+        <table id="judgmentTable"></table>
+      </div>
+
+      <div class="actions">
+        <button id="calculateBtn" class="btn primary">Calculate AHP Weights</button>
+      </div>
+    </section>
+
+    <section id="results" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <h2>Results</h2>
+          <p id="resultSubtitle">Complete all active judgments and calculate the model.</p>
+        </div>
+        <div class="actions compact results-actions">
+          <button id="csvBtn" class="btn secondary" disabled>Export Weights CSV</button>
+          <button id="weightImgBtn" class="btn accent" disabled>Download Weight % PNG</button>
+          <button id="matrixImgBtn" class="btn accent" disabled>Download Comparison Matrix PNG</button>
+          <button id="printBtn" class="btn ghost">Print / Save PDF</button>
+        </div>
+      </div>
+
+      <div id="resultEmpty" class="empty-state">
+        <div class="empty-icon">∑</div>
+        <h3>No calculation yet</h3>
+        <p>Build the model, complete the pairwise judgments, and click <b>Calculate AHP Weights</b>.</p>
+      </div>
+
+      <div id="resultContent" class="hidden">
+        <div class="consistency-grid">
+          <div class="metric"><span>λmax</span><strong id="lambdaMax">—</strong></div>
+          <div class="metric"><span>CI</span><strong id="ciValue">—</strong></div>
+          <div class="metric"><span>RI</span><strong id="riValue">—</strong></div>
+          <div class="metric featured"><span>CR</span><strong id="crValue">—</strong></div>
+          <div class="metric status"><span>Status</span><strong id="crStatus">—</strong><small id="crExplain" class="metric-note">—</small></div>
+        </div>
+
+        <div class="results-grid">
+          <div>
+            <h3>Priority Weights & Ranking</h3>
+            <div class="table-wrap">
+              <table id="weightsTable"></table>
+            </div>
+          </div>
+          <div>
+            <div class="subhead-inline">
+              <h3>Weight Distribution</h3>
+              <span class="sub-tag">High-resolution publication figure</span>
+            </div>
+            <div id="weightBars" class="bar-chart"></div>
+          </div>
+        </div>
+
+        <div class="subhead-inline matrix-head">
+          <h3>Aggregated Group Pairwise Comparison Matrix</h3>
+          <span class="sub-tag">High-resolution publication matrix</span>
+        </div>
+        <div class="matrix-legend">
+          <span><i class="legend-box legend-low"></i> Lower than 1 (Criterion B dominates)</span>
+          <span><i class="legend-box legend-mid"></i> Equal / diagonal</span>
+          <span><i class="legend-box legend-high"></i> Higher than 1 (Criterion A dominates)</span>
+        </div>
+        <div class="table-wrap">
+          <table id="matrixTable" class="matrix"></table>
+        </div>
+
+        <div class="method-note">
+          <h3>Method used</h3>
+          <p>Individual judgments are aggregated by geometric mean. Criterion priorities are calculated with the row geometric mean method. Consistency is evaluated using λmax, Consistency Index (CI), Random Index (RI), and Consistency Ratio (CR).</p>
+        </div>
+      </div>
+    </section>
+
+    <section id="scale" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">REFERENCE GUIDE</span>
+          <h2>Complete Saaty Pairwise Comparison Scale</h2>
+          <p>Interpret every value available in the judgment dropdowns. The scale always compares <b>Criterion A against Criterion B</b>.</p>
+        </div>
+      </div>
+
+      <div class="scale-direction-grid">
+        <div class="direction-card reciprocal-card">
+          <span class="direction-range">1/9 → 1/2</span>
+          <strong>Criterion B is more important</strong>
+          <p>The smaller the reciprocal value, the stronger the preference for B over A.</p>
+        </div>
+        <div class="direction-card equal-card">
+          <span class="direction-range">1</span>
+          <strong>Equal importance</strong>
+          <p>A and B contribute equally to the objective.</p>
+        </div>
+        <div class="direction-card direct-card">
+          <span class="direction-range">2 → 9</span>
+          <strong>Criterion A is more important</strong>
+          <p>The larger the value, the stronger the preference for A over B.</p>
+        </div>
+      </div>
+
+      <div class="table-wrap scale-wrap">
+        <table class="scale-table">
+          <thead><tr><th>Judgment</th><th>Decimal</th><th>Meaning for A vs B</th><th>Interpretation</th></tr></thead>
+          <tbody>
+            <tr class="scale-recip"><td><b>1/9</b></td><td>0.111</td><td>B is extremely more important than A</td><td>Extreme preference for Criterion B</td></tr>
+            <tr class="scale-recip"><td><b>1/8</b></td><td>0.125</td><td>B is between very strongly and extremely more important</td><td>Intermediate judgment: 7 and 9 in favor of B</td></tr>
+            <tr class="scale-recip"><td><b>1/7</b></td><td>0.143</td><td>B is very strongly more important than A</td><td>Very strong preference for Criterion B</td></tr>
+            <tr class="scale-recip"><td><b>1/6</b></td><td>0.167</td><td>B is between strongly and very strongly more important</td><td>Intermediate judgment: 5 and 7 in favor of B</td></tr>
+            <tr class="scale-recip"><td><b>1/5</b></td><td>0.200</td><td>B is strongly more important than A</td><td>Strong preference for Criterion B</td></tr>
+            <tr class="scale-recip"><td><b>1/4</b></td><td>0.250</td><td>B is between moderately and strongly more important</td><td>Intermediate judgment: 3 and 5 in favor of B</td></tr>
+            <tr class="scale-recip"><td><b>1/3</b></td><td>0.333</td><td>B is moderately more important than A</td><td>Moderate preference for Criterion B</td></tr>
+            <tr class="scale-recip"><td><b>1/2</b></td><td>0.500</td><td>B is slightly more important than A</td><td>Intermediate judgment between equal and moderate, in favor of B</td></tr>
+            <tr class="scale-equal"><td><b>1</b></td><td>1.000</td><td>A and B are equally important</td><td>Equal importance</td></tr>
+            <tr class="scale-direct"><td><b>2</b></td><td>2.000</td><td>A is slightly more important than B</td><td>Intermediate judgment between equal and moderate, in favor of A</td></tr>
+            <tr class="scale-direct"><td><b>3</b></td><td>3.000</td><td>A is moderately more important than B</td><td>Moderate preference for Criterion A</td></tr>
+            <tr class="scale-direct"><td><b>4</b></td><td>4.000</td><td>A is between moderately and strongly more important</td><td>Intermediate judgment: 3 and 5 in favor of A</td></tr>
+            <tr class="scale-direct"><td><b>5</b></td><td>5.000</td><td>A is strongly more important than B</td><td>Strong preference for Criterion A</td></tr>
+            <tr class="scale-direct"><td><b>6</b></td><td>6.000</td><td>A is between strongly and very strongly more important</td><td>Intermediate judgment: 5 and 7 in favor of A</td></tr>
+            <tr class="scale-direct"><td><b>7</b></td><td>7.000</td><td>A is very strongly more important than B</td><td>Very strong preference for Criterion A</td></tr>
+            <tr class="scale-direct"><td><b>8</b></td><td>8.000</td><td>A is between very strongly and extremely more important</td><td>Intermediate judgment: 7 and 9 in favor of A</td></tr>
+            <tr class="scale-direct"><td><b>9</b></td><td>9.000</td><td>A is extremely more important than B</td><td>Extreme preference for Criterion A</td></tr>
+          </tbody>
+        </table>
+      </div>
+      <div class="scale-footnote">
+        <strong>Consistency rule:</strong> CR ≤ 0.10 is commonly treated as acceptable in AHP. If CR &gt; 0.10, review the pairwise judgments for contradictions before using the final weights.
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <div class="wrap footer-content">
+      <div class="footer-brand">
+        <strong>AHP Hazard Weight Calculator</strong>
+        <span>Developed by Md Refath Hossan • For research, GIS, remote sensing & MCDA</span>
+      </div>
+      <div class="footer-links" aria-label="Developer contact and research profiles">
+        <a class="footer-link" href="mailto:refath.refathhossan10@gmail.com">
+          <span class="footer-icon">✉</span><span><small>Email</small>refath.refathhossan10@gmail.com</span>
+        </a>
+        <a class="footer-link" href="https://www.researchgate.net/profile/Md-Refath-Hossan" target="_blank" rel="noopener noreferrer">
+          <span class="footer-icon">R<sup>G</sup></span><span><small>ResearchGate</small>Md Refath Hossan</span>
+        </a>
+        <a class="footer-link" href="https://scholar.google.com/citations?user=ZbpOUv8AAAAJ&hl=en" target="_blank" rel="noopener noreferrer">
+          <span class="footer-icon">G</span><span><small>Google Scholar</small>View researcher profile</span>
+        </a>
+      </div>
+    </div>
+  </footer>
+
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <script src="script.js"></script>
+</body>
+</html>
