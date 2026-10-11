@@ -43,7 +43,10 @@ const state = {
   indicators: [],
   descriptions: [],
   judgments: {},
-  result: null
+  result: null,
+  expertDiagnostics: null,
+  sensitivity: null,
+  validation: null
 };
 
 const $ = (id) => document.getElementById(id);
@@ -109,19 +112,28 @@ function updateCounts() {
 }
 
 function rebuildIndicatorsIfCountChanged() {
-  const newN = clamp($('indicatorCount').value,3,25);
-  const newR = clamp($('respondentCount').value,2,20);
-  if (newN !== state.n || newR !== state.respondents) {
-    state.n = newN;
-    state.respondents = newR;
+  const newN = clamp($('indicatorCount').value, 3, 25);
+  const newR = clamp($('respondentCount').value, 2, 20);
+  const sizeChanged = newN !== state.n || newR !== state.respondents;
+
+  // Always write the exact selected values back to state and controls.
+  state.n = newN;
+  state.respondents = newR;
+  $('indicatorCount').value = String(newN);
+  $('respondentCount').value = String(newR);
+
+  if (sizeChanged) {
     initializeIndicators();
+    // A matrix built for another n/N cannot safely be reused.
     state.judgments = {};
     state.result = null;
     renderIndicatorInputs();
-    renderJudgmentTable();
     clearResults();
   }
+
   updateCounts();
+  // Rebuild every time so the visible table can never retain old R columns/pairs.
+  renderJudgmentTable();
 }
 
 function optionsHtml(selected='') {
@@ -191,6 +203,191 @@ function updateCompletion() {
   $('completionBar').style.width = `${x.pct}%`;
 }
 
+
+function matrixMetrics(A) {
+  const n = A.length;
+  const rowGM = A.map(row => Math.exp(row.reduce((s,v)=>s+Math.log(v),0)/n));
+  const total = rowGM.reduce((a,b)=>a+b,0);
+  const weights = rowGM.map(v=>v/total);
+  const aw = A.map(row => row.reduce((s,aij,j)=>s+aij*weights[j],0));
+  const lambdaI = aw.map((v,i)=>v/weights[i]);
+  const lambdaMax = lambdaI.reduce((a,b)=>a+b,0)/n;
+  const ci = n > 1 ? (lambdaMax-n)/(n-1) : 0;
+  const ri = RI[n] ?? 0;
+  const cr = ri ? ci/ri : 0;
+  const ranking = weights.map((w,i)=>({i,w})).sort((a,b)=>b.w-a.w);
+  const ranks = Array(n);
+  ranking.forEach((x,rank)=>ranks[x.i]=rank+1);
+  return {rowGM,weights,lambdaI,lambdaMax,ci,ri,cr,ranks};
+}
+
+function buildExpertMatrix(respondentIndex) {
+  const A = Array.from({length:state.n},()=>Array(state.n).fill(1));
+  for (let i=0;i<state.n;i++) {
+    for (let j=i+1;j<state.n;j++) {
+      const arr = state.judgments[pairKey(i,j)] || [];
+      const v = Number(arr[respondentIndex]);
+      if (!(v > 0)) return null;
+      A[i][j] = v;
+      A[j][i] = 1/v;
+    }
+  }
+  return A;
+}
+
+function calculateExpertDiagnostics() {
+  if (!state.result) { state.expertDiagnostics = null; return; }
+  const experts = [];
+  for (let r=0;r<state.respondents;r++) {
+    const A = buildExpertMatrix(r);
+    if (!A) continue;
+    const m = matrixMetrics(A);
+    experts.push({respondent:r+1, ...m});
+  }
+  const pairs=[];
+  for (let i=0;i<state.n;i++) {
+    for (let j=i+1;j<state.n;j++) {
+      const vals=(state.judgments[pairKey(i,j)]||[]).map(Number).filter(v=>v>0);
+      const n=vals.length;
+      const logVals=vals.map(Math.log);
+      const meanLog=logVals.reduce((a,b)=>a+b,0)/n;
+      const gm=Math.exp(meanLog);
+      const logVar=n>1 ? logVals.reduce((s,v)=>s+(v-meanLog)**2,0)/(n-1) : 0;
+      const logSD=Math.sqrt(logVar);
+      const gsd=Math.exp(logSD);
+      const mean=vals.reduce((a,b)=>a+b,0)/n;
+      const sd=n>1 ? Math.sqrt(vals.reduce((s,v)=>s+(v-mean)**2,0)/(n-1)) : 0;
+      const cv=mean ? sd/mean : 0;
+      const level=gsd<=1.25?'Low':gsd<=1.50?'Moderate':'High';
+      pairs.push({i,j,gm,gsd,cv,min:Math.min(...vals),max:Math.max(...vals),level});
+    }
+  }
+  state.expertDiagnostics={experts,pairs};
+}
+
+function renderExpertDiagnostics() {
+  const d=state.expertDiagnostics;
+  if (!d || !d.experts.length) {
+    $('expertEmpty').classList.remove('hidden');
+    $('expertContent').classList.add('hidden');
+    $('expertImgBtn').disabled=true;
+    $('disagreementImgBtn').disabled=true;
+    return;
+  }
+  $('expertEmpty').classList.add('hidden');
+  $('expertContent').classList.remove('hidden');
+  $('expertImgBtn').disabled=false;
+  $('disagreementImgBtn').disabled=false;
+  const acceptable=d.experts.filter(x=>x.cr<=0.10).length;
+  const meanCR=d.experts.reduce((s,x)=>s+x.cr,0)/d.experts.length;
+  const highPairs=d.pairs.filter(x=>x.level==='High').length;
+  const moderatePairs=d.pairs.filter(x=>x.level==='Moderate').length;
+  $('expertSummary').innerHTML=`
+    <div class="summary-card ${acceptable===d.experts.length?'success':'warn'}"><span>Experts acceptable</span><strong>${acceptable}/${d.experts.length}</strong></div>
+    <div class="summary-card"><span>Mean individual CR</span><strong>${fmt(meanCR,4)}</strong></div>
+    <div class="summary-card ${highPairs?'danger':'success'}"><span>High-disagreement pairs</span><strong>${highPairs}</strong></div>
+    <div class="summary-card ${moderatePairs?'warn':''}"><span>Moderate-disagreement pairs</span><strong>${moderatePairs}</strong></div>`;
+  let et='<thead><tr><th>Respondent</th><th>λmax</th><th>CI</th><th>RI</th><th>CR</th><th>Status</th></tr></thead><tbody>';
+  d.experts.forEach(x=>{const ok=x.cr<=.10; et+=`<tr><td>R${x.respondent}</td><td>${fmt(x.lambdaMax,4)}</td><td>${fmt(x.ci,4)}</td><td>${fmt(x.ri,2)}</td><td><b>${fmt(x.cr,4)}</b></td><td><span class="status-pill ${ok?'ok':'missing'}">${ok?'Acceptable':'Revise'}</span></td></tr>`});
+  et+='</tbody>'; $('expertTable').innerHTML=et;
+  const maxCR=Math.max(.20,...d.experts.map(x=>x.cr));
+  $('expertCrBars').innerHTML=d.experts.map(x=>{
+    const ok=x.cr<=.10; const width=Math.min(100,x.cr/maxCR*100);
+    return `<div class="mini-bar-row"><b>R${x.respondent}</b><div class="mini-bar-track"><div class="mini-bar-threshold"></div><div class="mini-bar-fill" style="width:${width}%;background:${ok?'linear-gradient(90deg,#008c95,#55d1b2)':'linear-gradient(90deg,#e84a5f,#f3a7bd)'}"></div></div><div class="mini-bar-value">${fmt(x.cr,3)}</div></div>`;
+  }).join('');
+  let dt='<thead><tr><th>Criterion A</th><th>Criterion B</th><th>Group GM</th><th>GSD</th><th>CV</th><th>Min</th><th>Max</th><th>Disagreement</th></tr></thead><tbody>';
+  d.pairs.slice().sort((a,b)=>b.gsd-a.gsd).forEach(x=>{ const cls=x.level==='Low'?'disagreement-low':x.level==='Moderate'?'disagreement-moderate':'disagreement-high'; dt+=`<tr><td style="text-align:left">${escapeHtml(state.indicators[x.i])}</td><td style="text-align:left">${escapeHtml(state.indicators[x.j])}</td><td>${fmt(x.gm,4)}</td><td>${fmt(x.gsd,3)}</td><td>${(x.cv*100).toFixed(1)}%</td><td>${fmt(x.min,3)}</td><td>${fmt(x.max,3)}</td><td class="${cls}">${x.level}</td></tr>`; });
+  dt+='</tbody>'; $('disagreementTable').innerHTML=dt;
+}
+
+function adjustedWeights(base, index, factor) {
+  const out=base.slice();
+  const old=base[index];
+  let target=Math.max(0.000001,Math.min(0.999999,old*factor));
+  if (old>=0.999999) return out;
+  const scale=(1-target)/(1-old);
+  for (let i=0;i<out.length;i++) out[i]=i===index?target:out[i]*scale;
+  const sum=out.reduce((a,b)=>a+b,0);
+  return out.map(v=>v/sum);
+}
+function ranksFromWeights(weights) {
+  const ranks=Array(weights.length);
+  weights.map((w,i)=>({w,i})).sort((a,b)=>b.w-a.w).forEach((x,k)=>ranks[x.i]=k+1);
+  return ranks;
+}
+function computeSensitivity() {
+  if (!state.result) { state.sensitivity=null; return; }
+  const pct=clamp($('sensitivityPct')?.value||10,1,90)/100;
+  const rows=state.result.weights.map((w,i)=>{
+    const low=adjustedWeights(state.result.weights,i,1-pct);
+    const high=adjustedWeights(state.result.weights,i,1+pct);
+    const lowRanks=ranksFromWeights(low), highRanks=ranksFromWeights(high);
+    const baseRank=state.result.ranks[i];
+    const maxShift=Math.max(Math.abs(lowRanks[i]-baseRank),Math.abs(highRanks[i]-baseRank));
+    return {i,baseWeight:w,lowWeight:low[i],highWeight:high[i],baseRank,lowRank:lowRanks[i],highRank:highRanks[i],stable:maxShift===0,maxShift,lowAll:low,highAll:high};
+  });
+  state.sensitivity={pct,rows};
+}
+function renderSensitivity() {
+  if (!state.result) {
+    $('sensitivityEmpty').classList.remove('hidden'); $('sensitivityContent').classList.add('hidden'); $('sensitivityImgBtn').disabled=true; return;
+  }
+  $('sensitivityEmpty').classList.add('hidden'); $('sensitivityContent').classList.remove('hidden'); $('sensitivityImgBtn').disabled=false;
+  const sel=$('sensitivityCriterion');
+  const previous=Number(sel.value)||0;
+  sel.innerHTML=state.indicators.map((x,i)=>`<option value="${i}" ${i===Math.min(previous,state.n-1)?'selected':''}>${escapeHtml(x)}</option>`).join('');
+  computeSensitivity();
+  const s=state.sensitivity; const stable=s.rows.filter(x=>x.stable).length; const pctStable=100*stable/state.n;
+  $('sensitivityScore').innerHTML=`<b>${pctStable.toFixed(0)}% rank-stable</b><span>${stable} of ${state.n} criteria keep their own rank under ±${Math.round(s.pct*100)}% weight perturbation.</span>`;
+  $('sensitivityTag').textContent=`±${Math.round(s.pct*100)}% perturbation`;
+  let st='<thead><tr><th>Criterion</th><th>Original Weight</th><th>− Weight</th><th>+ Weight</th><th>Original Rank</th><th>Rank at −</th><th>Rank at +</th><th>Stability</th></tr></thead><tbody>';
+  s.rows.forEach(x=>{st+=`<tr><td style="text-align:left">${escapeHtml(state.indicators[x.i])}</td><td>${(x.baseWeight*100).toFixed(2)}%</td><td>${(x.lowWeight*100).toFixed(2)}%</td><td>${(x.highWeight*100).toFixed(2)}%</td><td>${x.baseRank}</td><td>${x.lowRank}</td><td>${x.highRank}</td><td><span class="stability-pill ${x.stable?'stable':'shift'}">${x.stable?'Stable':`Shift ≤ ${x.maxShift}`}</span></td></tr>`});
+  st+='</tbody>'; $('sensitivityTable').innerHTML=st;
+  renderSensitivityChart();
+}
+function renderSensitivityChart() {
+  if (!state.sensitivity) return;
+  const idx=clamp($('sensitivityCriterion').value||0,0,state.n-1);
+  const row=state.sensitivity.rows[idx];
+  const max=Math.max(...row.lowAll,...state.result.weights,...row.highAll);
+  let html=`<div class="scenario-legend"><span><i style="background:#e56b8d"></i>Criterion ${escapeHtml(state.indicators[idx])} decreased</span><span><i style="background:#0b63ce"></i>Original</span><span><i style="background:#008c95"></i>Criterion ${escapeHtml(state.indicators[idx])} increased</span></div>`;
+  state.indicators.forEach((name,i)=>{html+=`<div class="scenario-row"><b>${escapeHtml(name)}</b><div class="scenario-bars"><div class="scenario-bar low" style="width:${100*row.lowAll[i]/max}%"></div><div class="scenario-bar base" style="width:${100*state.result.weights[i]/max}%"></div><div class="scenario-bar high" style="width:${100*row.highAll[i]/max}%"></div></div><span>${(state.result.weights[i]*100).toFixed(2)}%</span></div>`});
+  $('sensitivityChart').innerHTML=html;
+}
+
+function safeDiv(a,b) { return b ? a/b : 0; }
+function calculateValidation() {
+  const tp=Math.max(0,Number($('valTP').value)||0), fp=Math.max(0,Number($('valFP').value)||0), fn=Math.max(0,Number($('valFN').value)||0), tn=Math.max(0,Number($('valTN').value)||0);
+  const total=tp+fp+fn+tn;
+  if (!total) return toast('Enter at least one validation observation.');
+  const accuracy=safeDiv(tp+tn,total), precision=safeDiv(tp,tp+fp), recall=safeDiv(tp,tp+fn), specificity=safeDiv(tn,tn+fp), f1=safeDiv(2*precision*recall,precision+recall);
+  const po=accuracy;
+  const pe=safeDiv((tp+fp)*(tp+fn)+(fn+tn)*(fp+tn),total*total);
+  const kappa=(1-pe)?(po-pe)/(1-pe):0;
+  const aucRaw=$('valAUC').value.trim(); const auc=aucRaw===''?null:Math.min(1,Math.max(0,Number(aucRaw)));
+  state.validation={tp,fp,fn,tn,total,accuracy,precision,recall,specificity,f1,kappa,auc};
+  renderValidation();
+  toast('Validation metrics calculated.');
+}
+function validationQuality(v) {
+  if (v.auc!==null) return v.auc>=.9?'Excellent':v.auc>=.8?'Very good':v.auc>=.7?'Acceptable':v.auc>=.6?'Weak':'Poor';
+  return v.accuracy>=.9?'Excellent':v.accuracy>=.8?'Very good':v.accuracy>=.7?'Acceptable':v.accuracy>=.6?'Weak':'Poor';
+}
+function renderValidation() {
+  const v=state.validation;
+  if (!v) { $('validationResults').classList.add('hidden'); $('validationImgBtn').disabled=true; return; }
+  $('validationResults').classList.remove('hidden'); $('validationImgBtn').disabled=false;
+  const metrics=[['Accuracy',v.accuracy],['Precision',v.precision],['Recall / Sensitivity',v.recall],['Specificity',v.specificity],['F1-score',v.f1],['Cohen’s κ',v.kappa]];
+  if (v.auc!==null) metrics.push(['ROC-AUC',v.auc]);
+  $('validationMetrics').innerHTML=metrics.map(([k,x])=>`<div class="summary-card"><span>${k}</span><strong>${x.toFixed(3)}</strong></div>`).join('');
+  $('confusionMatrix').innerHTML=`<div class="cm-cell cm-head">Observed ↓ / Predicted →</div><div class="cm-cell cm-head">Susceptible</div><div class="cm-cell cm-head">Non-susceptible</div><div class="cm-cell cm-side">Observed hazard</div><div class="cm-cell cm-tp"><small>True Positive</small><strong>${v.tp}</strong><span>TP</span></div><div class="cm-cell cm-fn"><small>False Negative</small><strong>${v.fn}</strong><span>FN</span></div><div class="cm-cell cm-side">No observed hazard</div><div class="cm-cell cm-fp"><small>False Positive</small><strong>${v.fp}</strong><span>FP</span></div><div class="cm-cell cm-tn"><small>True Negative</small><strong>${v.tn}</strong><span>TN</span></div>`;
+  const quality=validationQuality(v);
+  $('validationInterpretation').innerHTML=`<span class="quality-badge">${quality} validation performance</span><h4>Independent validation summary</h4><p>The validation set contains <b>${v.total}</b> observations. The model correctly classifies <b>${(v.accuracy*100).toFixed(1)}%</b> of them. It detects <b>${(v.recall*100).toFixed(1)}%</b> of observed hazard occurrences (recall) and correctly identifies <b>${(v.specificity*100).toFixed(1)}%</b> of non-hazard observations (specificity).</p><p>${v.auc!==null?`The supplied ROC-AUC is <b>${v.auc.toFixed(3)}</b>. `:''}Cohen’s κ is <b>${v.kappa.toFixed(3)}</b>, providing a chance-corrected agreement measure. Report the validation sampling design, threshold/classification rule, and whether the inventory was independent from model construction in any publication.</p>`;
+}
+function clearValidation() {
+  ['valTP','valFP','valFN','valTN','valAUC'].forEach(id=>$(id).value=''); state.validation=null; renderValidation(); toast('Validation inputs cleared.');
+}
+
 function calculate() {
   syncSetupFromInputs();
   const comp = completionInfo();
@@ -209,21 +406,13 @@ function calculate() {
     }
   }
 
-  const rowGM = A.map(row => Math.exp(row.reduce((s,v)=>s+Math.log(v),0)/state.n));
-  const total = rowGM.reduce((a,b)=>a+b,0);
-  const weights = rowGM.map(v=>v/total);
-  const aw = A.map(row => row.reduce((s,aij,j)=>s+aij*weights[j],0));
-  const lambdaI = aw.map((v,i)=>v/weights[i]);
-  const lambdaMax = lambdaI.reduce((a,b)=>a+b,0)/state.n;
-  const ci = state.n > 1 ? (lambdaMax-state.n)/(state.n-1) : 0;
-  const ri = RI[state.n] ?? 0;
-  const cr = ri ? ci/ri : 0;
-  const ranking = weights.map((w,i)=>({i,w})).sort((a,b)=>b.w-a.w).map((x,rank)=>({...x,rank:rank+1}));
-  const ranks = Array(state.n);
-  ranking.forEach(x=>ranks[x.i]=x.rank);
-
-  state.result = {A,rowGM,weights,lambdaI,lambdaMax,ci,ri,cr,ranks};
+  const metrics = matrixMetrics(A);
+  state.result = {A,...metrics};
+  calculateExpertDiagnostics();
+  computeSensitivity();
   renderResults();
+  renderExpertDiagnostics();
+  renderSensitivity();
   switchTab('results');
   toast('AHP weights calculated successfully.');
 }
@@ -287,6 +476,9 @@ function clearResults() {
   $('weightImgBtn').disabled = true;
   $('matrixImgBtn').disabled = true;
   $('resultSubtitle').textContent = 'Complete all active judgments and calculate the model.';
+  state.expertDiagnostics=null; state.sensitivity=null;
+  if ($('expertEmpty')) renderExpertDiagnostics();
+  if ($('sensitivityEmpty')) renderSensitivity();
 }
 
 function switchTab(id) {
@@ -375,7 +567,8 @@ function loadFlashFlood() {
 function resetAll() {
   state.hazard='Hazard Susceptibility'; state.n=8; state.respondents=6;
   state.indicators=defaultIndicators(8); state.descriptions=Array(8).fill('');
-  state.judgments={}; state.result=null;
+  state.judgments={}; state.result=null; state.expertDiagnostics=null; state.sensitivity=null; state.validation=null;
+  ['valTP','valFP','valFN','valTN','valAUC'].forEach(id=>{ if($(id)) $(id).value=''; });
   $('hazardName').value=state.hazard; $('indicatorCount').value=8; $('respondentCount').value=6;
   renderIndicatorInputs(); updateCounts(); renderJudgmentTable(); clearResults();
   toast('Calculator reset.');
@@ -383,7 +576,7 @@ function resetAll() {
 
 function saveLocal() {
   syncSetupFromInputs();
-  const payload = {hazard:state.hazard,n:state.n,respondents:state.respondents,indicators:state.indicators,descriptions:state.descriptions,judgments:state.judgments};
+  const payload = {hazard:state.hazard,n:state.n,respondents:state.respondents,indicators:state.indicators,descriptions:state.descriptions,judgments:state.judgments,validation:state.validation};
   localStorage.setItem('ahp-calculator-refath-v2', JSON.stringify(payload));
   toast('Saved in this browser.');
 }
@@ -396,9 +589,9 @@ function loadLocal() {
     state.hazard=x.hazard||'Hazard Susceptibility'; state.n=clamp(x.n,3,25); state.respondents=clamp(x.respondents,2,20);
     state.indicators=Array.isArray(x.indicators)?x.indicators.slice(0,state.n):defaultIndicators(state.n);
     state.descriptions=Array.isArray(x.descriptions)?x.descriptions.slice(0,state.n):Array(state.n).fill('');
-    state.judgments=x.judgments||{}; state.result=null;
+    state.judgments=x.judgments||{}; state.result=null; state.validation=x.validation||null;
     $('hazardName').value=state.hazard; $('indicatorCount').value=state.n; $('respondentCount').value=state.respondents;
-    renderIndicatorInputs(); updateCounts(); renderJudgmentTable(); clearResults();
+    renderIndicatorInputs(); updateCounts(); renderJudgmentTable(); clearResults(); renderValidation();
     toast('Saved calculator loaded.');
   } catch { toast('Saved data could not be loaded.'); }
 }
@@ -636,8 +829,42 @@ function downloadMatrixImage() {
   downloadCanvas(canvas, `AHP_${state.hazard.replace(/[^a-z0-9]+/gi,'_')}_comparison_matrix.png`);
 }
 
+
+function createExpertCRCanvas(scale=3) {
+  const d=state.expertDiagnostics; if(!d) return null;
+  const width=1300, rowH=48, height=190+d.experts.length*rowH+60;
+  const c=document.createElement('canvas'); c.width=width*scale; c.height=height*scale; const ctx=c.getContext('2d'); ctx.scale(scale,scale);
+  ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.fillStyle='#102A43';ctx.font='700 28px Arial';ctx.fillText(`${state.hazard} - Individual Expert Consistency`,45,45);ctx.font='15px Arial';ctx.fillStyle='#617789';ctx.fillText(`AHP respondent-level CR diagnostic • acceptable when CR ≤ 0.10`,45,73);
+  const x0=220, bw=800, max=Math.max(.20,...d.experts.map(x=>x.cr));
+  ctx.strokeStyle='#e1e8ef';ctx.beginPath();ctx.moveTo(x0+bw*(.10/max),105);ctx.lineTo(x0+bw*(.10/max),height-45);ctx.stroke();ctx.fillStyle='#b21f49';ctx.font='13px Arial';ctx.fillText('CR = 0.10 threshold',x0+bw*(.10/max)+6,103);
+  d.experts.forEach((x,k)=>{const y=125+k*rowH;ctx.fillStyle='#173b5d';ctx.font='700 15px Arial';ctx.fillText(`Respondent R${x.respondent}`,45,y+18);drawRoundRect(ctx,x0,y,bw,20,10,'#edf1f5',null);const w=Math.max(3,bw*x.cr/max);const g=ctx.createLinearGradient(x0,y,x0+w,y);if(x.cr<=.10){g.addColorStop(0,'#008c95');g.addColorStop(1,'#55d1b2')}else{g.addColorStop(0,'#e84a5f');g.addColorStop(1,'#f3a7bd')}drawRoundRect(ctx,x0,y,w,20,10,g,null);ctx.fillStyle=x.cr<=.10?'#087a58':'#b21f49';ctx.font='700 15px Arial';ctx.fillText(`${x.cr.toFixed(4)}  ${x.cr<=.10?'Acceptable':'Revise'}`,1040,y+17)});
+  ctx.fillStyle='#6A7B8E';ctx.font='13px Arial';ctx.fillText('Generated from the AHP Hazard Weight Calculator',45,height-22);return c;
+}
+function createDisagreementCanvas(scale=3) {
+  const d=state.expertDiagnostics; if(!d)return null; const top=d.pairs.slice().sort((a,b)=>b.gsd-a.gsd).slice(0,Math.min(20,d.pairs.length));
+  const width=1500,rowH=48,height=185+top.length*rowH+60,c=document.createElement('canvas');c.width=width*scale;c.height=height*scale;const ctx=c.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.fillStyle='#102A43';ctx.font='700 28px Arial';ctx.fillText(`${state.hazard} - Expert Disagreement Screening`,45,43);ctx.font='15px Arial';ctx.fillStyle='#617789';ctx.fillText('Top criterion pairs ranked by geometric standard deviation (GSD)',45,70);
+  const cols=[45,370,695,850,990,1130,1270];['Criterion A','Criterion B','Group GM','GSD','CV','Range','Level'].forEach((h,i)=>{ctx.fillStyle='#15455c';ctx.font='700 14px Arial';ctx.fillText(h,cols[i],115)});
+  top.forEach((x,k)=>{const y=135+k*rowH;ctx.fillStyle=k%2?'#f7fafc':'#fff';ctx.fillRect(35,y-10,width-70,rowH);ctx.fillStyle='#173b5d';ctx.font='14px Arial';ctx.fillText(fitText(ctx,state.indicators[x.i],290),cols[0],y+15);ctx.fillText(fitText(ctx,state.indicators[x.j],290),cols[1],y+15);ctx.fillText(x.gm.toFixed(3),cols[2],y+15);ctx.fillText(x.gsd.toFixed(3),cols[3],y+15);ctx.fillText(`${(x.cv*100).toFixed(1)}%`,cols[4],y+15);ctx.fillText(`${x.min.toFixed(2)}–${x.max.toFixed(2)}`,cols[5],y+15);const color=x.level==='Low'?'#087a58':x.level==='Moderate'?'#7a5200':'#b21f49';ctx.fillStyle=color;ctx.font='700 14px Arial';ctx.fillText(x.level,cols[6],y+15)});ctx.fillStyle='#6A7B8E';ctx.font='13px Arial';ctx.fillText('GSD bands are practical diagnostics, not universal inferential cutoffs.',45,height-22);return c;
+}
+function createSensitivityCanvas(scale=3) {
+  if(!state.sensitivity)return null; const s=state.sensitivity,width=1500,rowH=50,height=190+state.n*rowH+60,c=document.createElement('canvas');c.width=width*scale;c.height=height*scale;const ctx=c.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.fillStyle='#102A43';ctx.font='700 28px Arial';ctx.fillText(`${state.hazard} - AHP Weight Sensitivity`,45,43);ctx.font='15px Arial';ctx.fillStyle='#617789';ctx.fillText(`Rank response when each criterion weight is perturbed by ±${Math.round(s.pct*100)}%`,45,70);const cols=[45,450,650,820,990,1140,1280];['Criterion','Base weight','Rank','Rank at −','Rank at +','Max shift','Status'].forEach((h,i)=>{ctx.fillStyle='#15455c';ctx.font='700 14px Arial';ctx.fillText(h,cols[i],115)});s.rows.forEach((x,k)=>{const y=135+k*rowH;ctx.fillStyle=k%2?'#f7fafc':'#fff';ctx.fillRect(35,y-10,width-70,rowH);ctx.fillStyle='#173b5d';ctx.font='14px Arial';ctx.fillText(fitText(ctx,state.indicators[x.i],365),cols[0],y+16);ctx.fillText(`${(x.baseWeight*100).toFixed(2)}%`,cols[1],y+16);ctx.fillText(String(x.baseRank),cols[2],y+16);ctx.fillText(String(x.lowRank),cols[3],y+16);ctx.fillText(String(x.highRank),cols[4],y+16);ctx.fillText(String(x.maxShift),cols[5],y+16);ctx.fillStyle=x.stable?'#087a58':'#b21f49';ctx.font='700 14px Arial';ctx.fillText(x.stable?'Stable':'Rank shift',cols[6],y+16)});ctx.fillStyle='#6A7B8E';ctx.font='13px Arial';ctx.fillText('All non-perturbed weights are proportionally rescaled so total weight remains 1.',45,height-22);return c;
+}
+function createValidationCanvas(scale=3) {
+  const v=state.validation;if(!v)return null;const width=1400,height=820,c=document.createElement('canvas');c.width=width*scale;c.height=height*scale;const ctx=c.getContext('2d');ctx.scale(scale,scale);ctx.fillStyle='#fff';ctx.fillRect(0,0,width,height);ctx.fillStyle='#102A43';ctx.font='700 29px Arial';ctx.fillText(`${state.hazard} - Hazard Validation Summary`,50,48);ctx.font='15px Arial';ctx.fillStyle='#617789';ctx.fillText(`Independent observed outcomes • N = ${v.total}${v.auc!==null?` • ROC-AUC = ${v.auc.toFixed(3)}`:''}`,50,77);
+  const x=55,y=145,labelW=210,cw=300,ch=190;const drawCell=(xx,yy,w,h,bg,title,value)=>{ctx.fillStyle=bg;ctx.fillRect(xx,yy,w,h);ctx.fillStyle='#173b5d';ctx.font='700 15px Arial';ctx.fillText(title,xx+18,yy+32);ctx.font='700 38px Arial';ctx.fillText(String(value),xx+18,yy+88)};drawCell(x+labelW,y,cw,70,'#dff3f4','Predicted: Susceptible','');drawCell(x+labelW+cw,y,cw,70,'#dff3f4','Predicted: Non-susceptible','');drawCell(x,y+70,labelW,ch,'#edf3f8','Observed hazard','');drawCell(x,y+70+ch,labelW,ch,'#edf3f8','No observed hazard','');drawCell(x+labelW,y+70,cw,ch,'#9be1be','True Positive (TP)',v.tp);drawCell(x+labelW+cw,y+70,cw,ch,'#f3a7bd','False Negative (FN)',v.fn);drawCell(x+labelW,y+70+ch,cw,ch,'#ffd166','False Positive (FP)',v.fp);drawCell(x+labelW+cw,y+70+ch,cw,ch,'#9bcff1','True Negative (TN)',v.tn);
+  const mx=960,my=150;ctx.fillStyle='#173b5d';ctx.font='700 19px Arial';ctx.fillText('Validation Metrics',mx,my);const metrics=[['Accuracy',v.accuracy],['Precision',v.precision],['Recall',v.recall],['Specificity',v.specificity],['F1-score',v.f1],['Cohen κ',v.kappa]];if(v.auc!==null)metrics.push(['ROC-AUC',v.auc]);metrics.forEach((m,k)=>{ctx.fillStyle='#617789';ctx.font='14px Arial';ctx.fillText(m[0],mx,my+45+k*62);ctx.fillStyle='#0a5d72';ctx.font='700 25px Arial';ctx.fillText(m[1].toFixed(3),mx+180,my+45+k*62)});ctx.fillStyle='#6A7B8E';ctx.font='13px Arial';ctx.fillText('Generated from the AHP Hazard Weight Calculator • Report validation sampling and thresholding in publications.',50,height-28);return c;
+}
+function downloadExpertImage(){downloadCanvas(createExpertCRCanvas(3),`AHP_${state.hazard.replace(/[^a-z0-9]+/gi,'_')}_expert_CR.png`)}
+function downloadDisagreementImage(){downloadCanvas(createDisagreementCanvas(3),`AHP_${state.hazard.replace(/[^a-z0-9]+/gi,'_')}_expert_disagreement.png`)}
+function downloadSensitivityImage(){computeSensitivity();renderSensitivity();downloadCanvas(createSensitivityCanvas(3),`AHP_${state.hazard.replace(/[^a-z0-9]+/gi,'_')}_sensitivity.png`)}
+function downloadValidationImage(){downloadCanvas(createValidationCanvas(3),`AHP_${state.hazard.replace(/[^a-z0-9]+/gi,'_')}_validation.png`)}
+
 // Events
-document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>switchTab(t.dataset.tab)));
+document.querySelectorAll('.tab').forEach(t=>t.addEventListener('click',()=>{
+  // Before opening Judgments, force the table to match the current selectors exactly.
+  if (t.dataset.tab === 'judgments') rebuildIndicatorsIfCountChanged();
+  switchTab(t.dataset.tab);
+}));
 $('indicatorCount').addEventListener('change', rebuildIndicatorsIfCountChanged);
 $('respondentCount').addEventListener('change', rebuildIndicatorsIfCountChanged);
 $('hazardName').addEventListener('input', ()=>state.hazard=$('hazardName').value);
@@ -652,6 +879,14 @@ $('loadBtn').addEventListener('click', loadLocal);
 $('csvBtn').addEventListener('click', exportCSV);
 $('weightImgBtn').addEventListener('click', downloadWeightImage);
 $('matrixImgBtn').addEventListener('click', downloadMatrixImage);
+$('expertImgBtn').addEventListener('click', downloadExpertImage);
+$('disagreementImgBtn').addEventListener('click', downloadDisagreementImage);
+$('sensitivityImgBtn').addEventListener('click', downloadSensitivityImage);
+$('sensitivityPct').addEventListener('change', ()=>{computeSensitivity();renderSensitivity();});
+$('sensitivityCriterion').addEventListener('change', renderSensitivityChart);
+$('calculateValidationBtn').addEventListener('click', calculateValidation);
+$('clearValidationBtn').addEventListener('click', clearValidation);
+$('validationImgBtn').addEventListener('click', downloadValidationImage);
 $('printBtn').addEventListener('click', ()=>window.print());
 
 // Initial render
@@ -660,3 +895,6 @@ state.descriptions = Array(state.n).fill('');
 renderIndicatorInputs();
 updateCounts();
 renderJudgmentTable();
+renderExpertDiagnostics();
+renderSensitivity();
+renderValidation();

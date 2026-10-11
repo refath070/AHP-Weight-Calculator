@@ -15,7 +15,7 @@
       <div>
         <span class="eyebrow">GIS • Remote Sensing • MCDA</span>
         <h1>AHP Hazard Weight Calculator</h1>
-        <p>Calculate group AHP weights for any hazard using 3–25 indicators and 2–20 respondents.</p>
+        <p>Calculate AHP weights with expert consistency, disagreement diagnostics, sensitivity testing, and hazard validation using 3–25 indicators and 2–20 respondents.</p>
       </div>
       <div class="hero-badge">Made by Refath</div>
     </div>
@@ -24,7 +24,10 @@
   <nav class="tabs wrap" aria-label="Calculator sections">
     <button class="tab active" data-tab="setup">1. Setup</button>
     <button class="tab" data-tab="judgments">2. Judgments</button>
-    <button class="tab" data-tab="results">3. Results</button>
+    <button class="tab" data-tab="results">3. Group Results</button>
+    <button class="tab" data-tab="experts">4. Expert Diagnostics</button>
+    <button class="tab" data-tab="sensitivity">5. Sensitivity</button>
+    <button class="tab" data-tab="validation">6. Hazard Validation</button>
     <button class="tab" data-tab="scale">Saaty Scale</button>
   </nav>
 
@@ -49,11 +52,57 @@
         <div class="grid two nested">
           <label class="field">
             <span>Indicators (n)</span>
-            <input id="indicatorCount" type="number" min="3" max="25" value="8" />
+            <select id="indicatorCount" aria-label="Number of indicators">
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6">6</option>
+              <option value="7">7</option>
+              <option value="8" selected>8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
+              <option value="19">19</option>
+              <option value="20">20</option>
+              <option value="21">21</option>
+              <option value="22">22</option>
+              <option value="23">23</option>
+              <option value="24">24</option>
+              <option value="25">25</option>
+            </select>
+            <small class="field-help">Select any value from 3 to 25.</small>
           </label>
           <label class="field">
-            <span>Respondents (N)</span>
-            <input id="respondentCount" type="number" min="2" max="20" value="6" />
+            <span>Respondents / Judges (N)</span>
+            <select id="respondentCount" aria-label="Number of respondents">
+              <option value="2">2</option>
+              <option value="3">3</option>
+              <option value="4">4</option>
+              <option value="5">5</option>
+              <option value="6" selected>6</option>
+              <option value="7">7</option>
+              <option value="8">8</option>
+              <option value="9">9</option>
+              <option value="10">10</option>
+              <option value="11">11</option>
+              <option value="12">12</option>
+              <option value="13">13</option>
+              <option value="14">14</option>
+              <option value="15">15</option>
+              <option value="16">16</option>
+              <option value="17">17</option>
+              <option value="18">18</option>
+              <option value="19">19</option>
+              <option value="20">20</option>
+            </select>
+            <small class="field-help">Select any value from 2 to 20.</small>
           </label>
         </div>
       </div>
@@ -166,6 +215,128 @@
         <div class="method-note">
           <h3>Method used</h3>
           <p>Individual judgments are aggregated by geometric mean. Criterion priorities are calculated with the row geometric mean method. Consistency is evaluated using λmax, Consistency Index (CI), Random Index (RI), and Consistency Ratio (CR). The calculator includes extended RI values for matrices up to 25 criteria.</p>
+        </div>
+      </div>
+    </section>
+
+
+    <section id="experts" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">METHODOLOGICAL DIAGNOSTICS</span>
+          <h2>Individual Expert Consistency & Disagreement</h2>
+          <p>Check each respondent before aggregation and identify criterion pairs where expert judgments diverge.</p>
+        </div>
+        <div class="actions compact">
+          <button id="expertImgBtn" class="btn accent" disabled>Download Expert CR PNG</button>
+          <button id="disagreementImgBtn" class="btn accent" disabled>Download Disagreement PNG</button>
+        </div>
+      </div>
+
+      <div id="expertEmpty" class="empty-state compact-empty">
+        <div class="empty-icon">CR</div>
+        <h3>Calculate the AHP model first</h3>
+        <p>Individual consistency and expert disagreement will be generated automatically from the respondent judgments.</p>
+      </div>
+
+      <div id="expertContent" class="hidden">
+        <div class="diagnostic-summary" id="expertSummary"></div>
+        <div class="diagnostic-grid">
+          <div>
+            <div class="subhead-inline"><h3>Individual Expert Consistency</h3><span class="sub-tag">CR ≤ 0.10 = acceptable</span></div>
+            <div class="table-wrap"><table id="expertTable"></table></div>
+          </div>
+          <div>
+            <div class="subhead-inline"><h3>CR by Respondent</h3><span class="sub-tag">Screen before aggregation</span></div>
+            <div id="expertCrBars" class="mini-bars"></div>
+          </div>
+        </div>
+
+        <div class="subhead-inline matrix-head"><h3>Inter-Expert Disagreement by Criterion Pair</h3><span class="sub-tag">Geometric dispersion</span></div>
+        <div class="notice soft-notice"><div class="notice-icon">i</div><div><b>Geometric standard deviation (GSD)</b> is calculated in log-ratio space. As a practical screening guide in this tool: GSD ≤ 1.25 = low disagreement, 1.25–1.50 = moderate, and &gt; 1.50 = high. Treat these bands as diagnostics rather than universal cutoffs.</div></div>
+        <div class="table-wrap tall"><table id="disagreementTable"></table></div>
+      </div>
+    </section>
+
+    <section id="sensitivity" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">ROBUSTNESS CHECK</span>
+          <h2>Weight Sensitivity Analysis</h2>
+          <p>Test whether criterion rankings remain stable when each final group weight is decreased or increased.</p>
+        </div>
+        <div class="actions compact">
+          <button id="sensitivityImgBtn" class="btn accent" disabled>Download Sensitivity PNG</button>
+        </div>
+      </div>
+
+      <div id="sensitivityEmpty" class="empty-state compact-empty">
+        <div class="empty-icon">±</div>
+        <h3>Calculate the AHP model first</h3>
+        <p>The sensitivity module uses the final group weights from the Results tab.</p>
+      </div>
+
+      <div id="sensitivityContent" class="hidden">
+        <div class="sensitivity-controls">
+          <label class="field"><span>Perturbation level</span>
+            <select id="sensitivityPct"><option value="5">±5%</option><option value="10" selected>±10%</option><option value="20">±20%</option><option value="30">±30%</option></select>
+          </label>
+          <label class="field"><span>Focus criterion for chart</span><select id="sensitivityCriterion"></select></label>
+          <div class="sensitivity-score" id="sensitivityScore"></div>
+        </div>
+        <div id="sensitivityChart" class="scenario-chart"></div>
+        <div class="subhead-inline matrix-head"><h3>Rank Stability for All Criteria</h3><span class="sub-tag" id="sensitivityTag">±10% perturbation</span></div>
+        <div class="table-wrap"><table id="sensitivityTable"></table></div>
+        <div class="method-note"><h3>How this sensitivity test works</h3><p>The selected criterion weight is reduced and increased by the chosen percentage. All other weights are proportionally rescaled so the total remains 1. The resulting ranks are compared with the original ranking. This tests robustness of the weight structure; validation against observed hazard outcomes should still be performed separately.</p></div>
+      </div>
+    </section>
+
+    <section id="validation" class="panel tab-panel">
+      <div class="section-head">
+        <div>
+          <span class="section-kicker">REAL-WORLD OUTCOME CHECK</span>
+          <h2>Hazard Susceptibility Validation</h2>
+          <p>Enter validation counts obtained by comparing your GIS susceptibility prediction with an independent observed hazard inventory.</p>
+        </div>
+        <div class="actions compact"><button id="validationImgBtn" class="btn accent" disabled>Download Validation PNG</button></div>
+      </div>
+
+      <div class="notice validation-note"><div class="notice-icon">✓</div><div>This module does not create the hazard map. First classify/threshold the susceptibility output in GIS, compare it with independent observed events, then enter the resulting counts below. Use validation data that were not used to build the model whenever possible.</div></div>
+
+      <div class="validation-layout">
+        <div class="validation-input-card">
+          <h3>Observed vs Predicted Counts</h3>
+          <div class="grid two validation-input-grid">
+            <label class="field"><span>True Positive (TP)</span><input id="valTP" type="number" min="0" step="1" value="80"></label>
+            <label class="field"><span>False Positive (FP)</span><input id="valFP" type="number" min="0" step="1" value="20"></label>
+            <label class="field"><span>False Negative (FN)</span><input id="valFN" type="number" min="0" step="1" value="15"></label>
+            <label class="field"><span>True Negative (TN)</span><input id="valTN" type="number" min="0" step="1" value="85"></label>
+          </div>
+          <label class="field"><span>ROC-AUC (optional, 0–1)</span><input id="valAUC" type="number" min="0" max="1" step="0.001" placeholder="e.g., 0.86"></label>
+          <div class="actions"><button id="calculateValidationBtn" class="btn primary">Calculate Validation Metrics</button><button id="clearValidationBtn" class="btn ghost">Clear</button></div>
+        </div>
+        <div class="validation-guide">
+          <h3>Definitions</h3>
+          <div class="definition-list">
+            <div><b>TP</b><span>Predicted susceptible and an observed hazard occurred.</span></div>
+            <div><b>FP</b><span>Predicted susceptible but no observed hazard occurred.</span></div>
+            <div><b>FN</b><span>Predicted non-susceptible but an observed hazard occurred.</span></div>
+            <div><b>TN</b><span>Predicted non-susceptible and no observed hazard occurred.</span></div>
+          </div>
+        </div>
+      </div>
+
+      <div id="validationResults" class="hidden">
+        <div class="validation-metrics" id="validationMetrics"></div>
+        <div class="validation-output-grid">
+          <div>
+            <div class="subhead-inline"><h3>Confusion Matrix</h3><span class="sub-tag">Observed outcome vs predicted class</span></div>
+            <div id="confusionMatrix" class="confusion-matrix"></div>
+          </div>
+          <div>
+            <div class="subhead-inline"><h3>Validation Interpretation</h3><span class="sub-tag">Independent evidence</span></div>
+            <div id="validationInterpretation" class="interpretation-card"></div>
+          </div>
         </div>
       </div>
     </section>
